@@ -1,23 +1,28 @@
 package nbradham.stitcher;
 
-import java.awt.FlowLayout;
 import java.awt.Graphics;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Iterator;
 
 import javax.imageio.ImageIO;
+import javax.swing.BoxLayout;
 import javax.swing.ImageIcon;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
+import javax.swing.JPanel;
 import javax.swing.JProgressBar;
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 
 /**
@@ -27,6 +32,8 @@ import javax.swing.SwingUtilities;
  *
  */
 final class Stitcher extends WindowAdapter {
+
+	private static final File OUT_DIR = new File("Stitched");
 
 	private final JFrame frame = new JFrame("Stitcher");
 	private final JProgressBar bar = new JProgressBar();
@@ -40,16 +47,50 @@ final class Stitcher extends WindowAdapter {
 	 * Displays GUI, handles loading, and handles stitching threads.
 	 */
 	private void start() {
-		frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-		frame.setResizable(false);
-		frame.addWindowListener(this);
-		frame.setLayout(new FlowLayout());
-		bar.setStringPainted(true);
-		frame.add(new JLabel("Status:"));
-		frame.add(new JLabel(new ImageIcon(Stitcher.class.getResource("/anim.gif"))));
-		frame.add(bar);
-		frame.pack();
-		frame.setVisible(true);
+		try {
+			SwingUtilities.invokeAndWait(() -> {
+				frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+				frame.setResizable(false);
+				frame.addWindowListener(this);
+				frame.setLayout(new GridBagLayout());
+
+				GridBagConstraints gbc = new GridBagConstraints();
+				gbc.gridx = 0;
+				gbc.gridy = 0;
+				gbc.weightx = .5;
+
+				bar.setStringPainted(true);
+				bar.setString("Ready.");
+				frame.add(new JLabel("Overall:"), gbc);
+
+				gbc.gridx = 1;
+				frame.add(new JLabel(new ImageIcon(Stitcher.class.getResource("/anim.gif"))), gbc);
+
+				gbc.gridx = 2;
+				frame.add(bar, gbc);
+
+				gbc.gridx = 0;
+				gbc.gridy = 1;
+				gbc.gridwidth = 3;
+				JPanel scrollPane = new JPanel();
+				scrollPane.setLayout(new BoxLayout(scrollPane, BoxLayout.Y_AXIS));
+
+				JScrollPane scroll = new JScrollPane(scrollPane, JScrollPane.VERTICAL_SCROLLBAR_ALWAYS,
+						JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+
+				for (byte i = 0; i < threads.length; i++) {
+					Worker w = new Worker(i);
+					scrollPane.add(w.getGUI());
+					threads[i] = new Thread(w);
+				}
+				frame.add(scroll, gbc);
+
+				frame.pack();
+				frame.setVisible(true);
+			});
+		} catch (InvocationTargetException | InterruptedException e1) {
+			JOptionPane.showMessageDialog(frame, "Something went wrong (" + e1 + ").");
+		}
 
 		JFileChooser jfc = new JFileChooser(
 				Paths.get(System.getenv("appdata"), "Factorio", "script-output", "screenshots").toFile());
@@ -76,41 +117,12 @@ final class Stitcher extends WindowAdapter {
 			return;
 		}
 
-		bar.setMaximum(shots.size() + 1);
+		bar.setMaximum(shots.size());
 		shotIterator = shots.values().iterator();
+		OUT_DIR.mkdir();
 
-		File output = new File("Stitched");
-		output.mkdir();
-
-		for (byte i = 0; i < threads.length; i++) {
-			threads[i] = new Thread(() -> {
-				Screenshot shot;
-				while ((shot = next()) != null) {
-					try {
-						Split split = shot.getSplit(0);
-						BufferedImage s0 = ImageIO.read(split.file());
-						int width = s0.getWidth(), height = s0.getHeight();
-
-						BufferedImage bi = new BufferedImage(width * shot.lengthX(), height * shot.lengthY(),
-								BufferedImage.TYPE_3BYTE_BGR);
-						Graphics g = bi.createGraphics();
-						g.drawImage(s0, width * split.x(), height * split.y(), null);
-
-						for (byte ind = 1; ind < shot.numSplits() && run; ind++) {
-							split = shot.getSplit(ind);
-							g.drawImage(ImageIO.read(split.file()), width * split.x(), height * split.y(), null);
-						}
-
-						String fName = split.file().getName();
-						ImageIO.write(bi, "jpg", new File(output, fName.substring(0, fName.indexOf('_')) + ".jpg"));
-						incProg();
-					} catch (IOException e) {
-						e.printStackTrace();
-					}
-				}
-			});
-			threads[i].start();
-		}
+		for (Thread t : threads)
+			t.start();
 
 		for (Thread t : threads)
 			try {
@@ -145,7 +157,11 @@ final class Stitcher extends WindowAdapter {
 	 * Increments the progress bar.
 	 */
 	private synchronized void incProg() {
-		SwingUtilities.invokeLater(() -> bar.setValue(bar.getValue() + 1));
+		SwingUtilities.invokeLater(() -> {
+			int val = bar.getValue() + 1;
+			bar.setValue(val);
+			bar.setString(val + "/" + bar.getMaximum());
+		});
 	}
 
 	@Override
@@ -162,5 +178,86 @@ final class Stitcher extends WindowAdapter {
 	 */
 	public static void main(String[] args) {
 		new Stitcher().start();
+	}
+
+	/**
+	 * Handles stitching screenshots.
+	 * 
+	 * @author Nickolas Bradham
+	 *
+	 */
+	private class Worker implements Runnable {
+
+		private final JProgressBar bar = new JProgressBar();
+		private final byte id;
+
+		/**
+		 * Constructs a new Worker and sets ID.
+		 * 
+		 * @param setID
+		 */
+		private Worker(byte setID) {
+			id = setID;
+			bar.setStringPainted(true);
+			bar.setString("Ready.");
+		}
+
+		/**
+		 * Retrieves the GUI component.
+		 * 
+		 * @return A new JPanel instance holding the GUI elements of this Worker.
+		 */
+		private JPanel getGUI() {
+			JPanel panel = new JPanel();
+			panel.add(new JLabel("Thread " + id + ": "));
+			panel.add(bar);
+			return panel;
+		}
+
+		/**
+		 * Updates the progress bar on the AWT thread.
+		 * 
+		 * @param val The value of the bar.
+		 * @param max The maximum of the bar.
+		 */
+		private void updateProg(int val, int max) {
+			SwingUtilities.invokeLater(() -> {
+				bar.setValue(val);
+				bar.setMaximum(max);
+				bar.setString(val + " /" + max);
+			});
+		}
+
+		@Override
+		public void run() {
+			Screenshot shot;
+			while ((shot = next()) != null) {
+				int max = shot.numSplits();
+				updateProg(0, max);
+				try {
+					Split split = shot.getSplit(0);
+					BufferedImage s0 = ImageIO.read(split.file());
+					int width = s0.getWidth(), height = s0.getHeight();
+
+					BufferedImage bi = new BufferedImage(width * shot.lengthX(), height * shot.lengthY(),
+							BufferedImage.TYPE_3BYTE_BGR);
+					Graphics g = bi.createGraphics();
+					g.drawImage(s0, width * split.x(), height * split.y(), null);
+
+					for (byte ind = 1; ind < max && run; ind++) {
+						updateProg(ind, max);
+						split = shot.getSplit(ind);
+						g.drawImage(ImageIO.read(split.file()), width * split.x(), height * split.y(), null);
+					}
+
+					String fName = split.file().getName();
+					ImageIO.write(bi, "jpg", new File(OUT_DIR, fName.substring(0, fName.indexOf('_')) + ".jpg"));
+					updateProg(max, max);
+					incProg();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+		}
 	}
 }
