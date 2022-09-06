@@ -1,7 +1,7 @@
 # Factorio-Screenshot-Stitcher
-Stitches screenshots together produced by [This](https://mods.factorio.com/mod/FacAutoScreenshot) Factorio mod.
+Stitches screenshots together produced by [this](https://mods.factorio.com/mod/FacAutoScreenshot) Factorio mod.
 
-The stitching tool provided by the mod author does not work, so I made my own and added a few improvements over the original (mainly adding a painfully basic GUI, some slight optimization, and using all native Java to reduce bloat and dependencies).
+The stitching tool provided by the mod author does not work (or at least the Java one didn't), so I made my own and added a few improvements over the original (mainly adding a painfully basic GUI, some slight optimization, and using all native Java to reduce bloat and dependencies). I plan to update the GUI to be more descriptive soon.
 
 Run the program and select the folder containing all the splits to stitch together. The program will then proceed to try and stitch them together and store them to the `Stitched` directory next to the executable. It is multithreaded, but will almost certainly be bottlenecked by reading and writing to storage. It will spawn as many threads as your computer has cores.
 
