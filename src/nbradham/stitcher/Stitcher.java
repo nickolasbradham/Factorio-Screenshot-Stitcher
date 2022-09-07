@@ -244,7 +244,7 @@ final class Stitcher extends WindowAdapter {
 					Graphics g = bi.createGraphics();
 					g.drawImage(s0, width * split.x(), height * split.y(), null);
 
-					for (byte ind = 1; ind < max && run; ind++) {
+					for (short ind = 1; ind < max && run; ind++) {
 						updateProg(ind, max);
 						split = shot.getSplit(ind);
 						g.drawImage(ImageIO.read(split.file()), width * split.x(), height * split.y(), null);
