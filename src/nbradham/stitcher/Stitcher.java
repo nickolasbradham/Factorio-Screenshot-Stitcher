@@ -12,6 +12,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Stack;
 
 import javax.imageio.ImageIO;
 import javax.swing.BoxLayout;
@@ -39,6 +40,7 @@ final class Stitcher extends WindowAdapter {
 	private final JProgressBar bar = new JProgressBar();
 	private final HashMap<String, Screenshot> shots = new HashMap<>();
 	private final Thread[] threads = new Thread[Runtime.getRuntime().availableProcessors()];
+	private final Stack<Screenshot> redos = new Stack<>();
 
 	private Iterator<Screenshot> shotIterator;
 	private boolean run = true;
@@ -121,6 +123,8 @@ final class Stitcher extends WindowAdapter {
 		shotIterator = shots.values().iterator();
 		OUT_DIR.mkdir();
 
+		bar.setString("0/" + bar.getMaximum());
+
 		for (Thread t : threads)
 			t.start();
 
@@ -150,7 +154,7 @@ final class Stitcher extends WindowAdapter {
 	 * @return The next Screenshot or null if there are no more to stitch.
 	 */
 	private synchronized Screenshot next() {
-		return shotIterator.hasNext() ? shotIterator.next() : null;
+		return shotIterator.hasNext() ? shotIterator.next() : redos.isEmpty() ? null : redos.pop();
 	}
 
 	/**
@@ -162,6 +166,10 @@ final class Stitcher extends WindowAdapter {
 			bar.setValue(val);
 			bar.setString(val + "/" + bar.getMaximum());
 		});
+	}
+
+	private synchronized void redo(Screenshot shot) {
+		redos.add(shot);
 	}
 
 	@Override
@@ -230,33 +238,41 @@ final class Stitcher extends WindowAdapter {
 
 		@Override
 		public void run() {
-			Screenshot shot;
-			while ((shot = next()) != null) {
-				int max = shot.numSplits();
-				updateProg(0, max);
-				try {
-					Split split = shot.getSplit(0);
-					BufferedImage s0 = ImageIO.read(split.file());
-					int width = s0.getWidth(), height = s0.getHeight();
+			Screenshot shot = null;
+			try {
+				while ((shot = next()) != null) {
+					int max = shot.numSplits();
+					updateProg(0, max);
+					try {
+						Split split = shot.getSplit(0);
+						BufferedImage s0 = ImageIO.read(split.file());
+						int width = s0.getWidth(), height = s0.getHeight();
 
-					BufferedImage bi = new BufferedImage(width * shot.lengthX(), height * shot.lengthY(),
-							BufferedImage.TYPE_3BYTE_BGR);
-					Graphics g = bi.createGraphics();
-					g.drawImage(s0, width * split.x(), height * split.y(), null);
+						BufferedImage bi = new BufferedImage(width * shot.lengthX(), height * shot.lengthY(),
+								BufferedImage.TYPE_3BYTE_BGR);
+						Graphics g = bi.createGraphics();
+						g.drawImage(s0, width * split.x(), height * split.y(), null);
 
-					for (short ind = 1; ind < max && run; ind++) {
-						updateProg(ind, max);
-						split = shot.getSplit(ind);
-						g.drawImage(ImageIO.read(split.file()), width * split.x(), height * split.y(), null);
+						for (short ind = 1; ind < max && run; ind++) {
+							updateProg(ind, max);
+							split = shot.getSplit(ind);
+							g.drawImage(ImageIO.read(split.file()), width * split.x(), height * split.y(), null);
+						}
+
+						String fName = split.file().getName();
+						ImageIO.write(bi, "jpg", new File(OUT_DIR, fName.substring(0, fName.indexOf('_')) + ".jpg"));
+						updateProg(max, max);
+						incProg();
+					} catch (IOException e) {
+						redo(shot);
+						SwingUtilities.invokeLater(() -> bar.setString("Crashed."));
+						e.printStackTrace();
 					}
-
-					String fName = split.file().getName();
-					ImageIO.write(bi, "jpg", new File(OUT_DIR, fName.substring(0, fName.indexOf('_')) + ".jpg"));
-					updateProg(max, max);
-					incProg();
-				} catch (IOException e) {
-					e.printStackTrace();
 				}
+			} catch (OutOfMemoryError e) {
+				redo(shot);
+				SwingUtilities.invokeLater(() -> bar.setString("Out of memory."));
+				e.printStackTrace();
 			}
 		}
 	}
