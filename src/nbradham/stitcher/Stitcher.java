@@ -27,7 +27,7 @@ import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 
 /**
- * Handles core execution.
+ * Handles all core execution.
  * 
  * @author Nickolas Bradham
  *
